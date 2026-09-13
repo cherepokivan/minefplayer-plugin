@@ -31,14 +31,23 @@ import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
 import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
+import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.HandPreference;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ChatVisibility;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.ParticleStatus;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.SkinPart;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundPingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket;
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundClientInformationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundCustomPayloadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundPongPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundCodeOfConductPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundAcceptCodeOfConductPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundCustomQueryPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundCustomQueryAnswerPacket;
 
 import java.util.Arrays;
 import java.util.BitSet;
@@ -92,6 +101,27 @@ public class BotSession {
                 if (!sentClientInfo && session.getPacketProtocol().getOutboundState() == ProtocolState.CONFIGURATION) {
                     sentClientInfo = true;
                     sendClientInfoAndBrand(session);
+                }
+
+                // Новый в 26.x пакет: сервер присылает свод правил и ждёт
+                // явного согласия - библиотека сама на него не отвечает.
+                if (packet instanceof ClientboundCodeOfConductPacket) {
+                    plugin.getLogger().info("[Minef] Получены правила сервера (Code of Conduct) - автоматически принимаю.");
+                    session.send(ServerboundAcceptCodeOfConductPacket.INSTANCE);
+                } else if (packet instanceof ClientboundResourcePackPushPacket pushPacket) {
+                    // Ресурспак тоже не обрабатывается автоматически.
+                    // Отвечаем "успешно загружен", реально ничего не
+                    // скачивая - боту всё равно нечего рендерить.
+                    plugin.getLogger().info("[Minef] Сервер прислал ресурспак (required=" + pushPacket.isRequired() + ") - подтверждаю загрузку.");
+                    session.send(new ServerboundResourcePackPacket(pushPacket.getId(), ResourcePackStatus.SUCCESSFULLY_LOADED));
+                } else if (packet instanceof ClientboundCustomQueryPacket queryPacket) {
+                    // Плагин задал вопрос через login plugin channel (анти-бот,
+                    // форвардинг и т.п.) - отвечаем "канал не поддерживается"
+                    // (null data), чтобы не блокировать логин навсегда.
+                    plugin.getLogger().info("[Minef] Login plugin-запрос по каналу " + queryPacket.getChannel() + " - отвечаю пустым ответом.");
+                    session.send(new ServerboundCustomQueryAnswerPacket(queryPacket.getMessageId(), null));
+                } else if (packet instanceof ClientboundPingPacket pingPacket) {
+                    session.send(new ServerboundPongPacket(pingPacket.getId()));
                 }
             }
 
