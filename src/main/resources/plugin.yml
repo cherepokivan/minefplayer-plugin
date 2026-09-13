@@ -1,0 +1,21 @@
+name: Minef
+main: com.example.minef.MinefPlugin
+version: '1.0'
+api-version: '26.2'
+author: you
+description: Виртуальный игрок-бот (через MCProtocolLib), управляемый командой /minef
+
+commands:
+  minef:
+    description: Управление виртуальным игроком-мостом
+    usage: |
+      /minef start - подключить виртуального игрока к этому же серверу
+      /minef stop - отключить
+      /minef status - проверить, подключён ли сейчас
+      /minef say <текст> - отправить сообщение (без "/") или команду (с "/") от его имени
+    permission: minef.admin
+
+permissions:
+  minef.admin:
+    description: Доступ к управлению виртуальным игроком
+    default: op

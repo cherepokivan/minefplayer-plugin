@@ -1,0 +1,55 @@
+name: Build Minef plugin
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # MCProtocolLib под Minecraft/Paper 26.2 ещё не опубликован как
+      # релиз/снапшот в Maven - собираем его из ветки feature/26.2
+      # и публикуем в локальный ~/.m2, откуда его подхватит Maven-сборка
+      # плагина ниже.
+      - name: Checkout MCProtocolLib (feature/26.2)
+        uses: actions/checkout@v4
+        with:
+          repository: GeyserMC/MCProtocolLib
+          ref: feature/26.2
+          path: mcprotocollib-src
+
+      - name: Grant execute permission for gradlew
+        working-directory: mcprotocollib-src
+        run: chmod +x gradlew
+
+      - name: Build & publish MCProtocolLib to local Maven repo
+        working-directory: mcprotocollib-src
+        run: ./gradlew publishToMavenLocal --no-daemon
+
+      # На случай, если версия из feature/26.2 отличается от значения
+      # в pom.xml - выводим, что реально опубликовалось, чтобы было
+      # видно в логах и можно было поправить pom.xml при расхождении.
+      - name: Show published MCProtocolLib version
+        run: find ~/.m2/repository/org/geysermc/mcprotocollib -maxdepth 2 -type d
+
+      - name: Build Minef plugin
+        run: mvn -B clean package
+
+      - name: Upload built jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: minef-plugin
+          path: target/minef.jar
