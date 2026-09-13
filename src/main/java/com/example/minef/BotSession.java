@@ -1,37 +1,41 @@
 package com.example.minef;
 
 /*
- * ВАЖНО ОБ ЭТОМ ФАЙЛЕ:
+ * Актуально под GeyserMC/MCProtocolLib, ветка feature/26.2 (проверено
+ * по исходникам напрямую - см. историю переписки для деталей).
  *
- * Точные имена классов/пакетов MCProtocolLib МЕНЯЛИСЬ между версиями
- * (старые релизы от Steveice10, новые - от GeyserMC, org.geysermc.mcprotocollib.*).
- * Ниже - рабочая схема на основе актуальной (на момент написания) структуры
- * проекта GeyserMC/MCProtocolLib. Перед компиляцией:
- *
- *   1. Откройте https://github.com/GeyserMC/MCProtocolLib и посмотрите
- *      папку src/main/java/.../protocol/packet/ingame/serverbound/
- *      чтобы найти актуальный класс для отправки чата/команды
- *      (обычно что-то вроде ServerboundChatPacket).
- *   2. При необходимости поправьте импорты ниже под реальную версию,
- *      которую вы прописали в pom.xml.
- *
- * Это нормальная часть работы с такими библиотеками - API у них не всегда
- * стабилен между мажорными версиями.
+ * Ключевые отличия от более старых версий библиотеки:
+ * - Класса TcpClientSession больше нет, вместо него ClientNetworkSession,
+ *   создаваемая через ClientNetworkSessionFactory.
+ * - connect()/isConnected() - на интерфейсе ClientSession (наследует Session).
+ * - Команды (текст с "/") и обычные сообщения - РАЗНЫЕ пакеты:
+ *   ServerboundChatCommandPacket для команд (просто строка без "/"),
+ *   ServerboundChatPacket для обычного чата - и он требует полный набор
+ *   полей подписи сообщения (timestamp/salt/signature/...), т.к. в этой
+ *   версии протокола это часть механизма защищённого чата.
+ *   Ниже сообщения отправляются БЕЗ подписи (signature = null) - это
+ *   может не сработать на серверах, где включена принудительная
+ *   secure chat проверка. Команды (наш основной сценарий - /dvc ...)
+ *   этой проблемы не имеют вообще.
  */
 
 import org.bukkit.Bukkit;
-import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
-import org.geysermc.mcprotocollib.network.Session;
-import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.geysermc.mcprotocollib.network.ClientSession;
+import org.geysermc.mcprotocollib.network.factory.ClientNetworkSessionFactory;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.ConnectedEvent;
+import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+
+import java.util.BitSet;
 
 public class BotSession {
 
     private final MinefPlugin plugin;
-    private Session session;
+    private ClientSession session;
     private volatile boolean shouldRun = false;
 
     // Имя виртуального игрока - должно быть свободно на сервере
@@ -56,7 +60,11 @@ public class BotSession {
         int port = Bukkit.getPort();
 
         MinecraftProtocol protocol = new MinecraftProtocol(BOT_USERNAME);
-        session = new TcpClientSession(host, port, protocol);
+
+        session = ClientNetworkSessionFactory.factory()
+            .setAddress(host, port)
+            .setProtocol(protocol)
+            .create();
 
         session.addListener(new SessionAdapter() {
             @Override
@@ -66,7 +74,10 @@ public class BotSession {
 
             @Override
             public void disconnected(DisconnectedEvent event) {
-                plugin.getLogger().info("[Minef] Отключился: " + event.getReason());
+                String reason = event.getReason() != null
+                    ? PlainTextComponentSerializer.plainText().serialize(event.getReason())
+                    : "неизвестна";
+                plugin.getLogger().info("[Minef] Отключился: " + reason);
                 if (shouldRun) {
                     // реконнект через 10 секунд, в основном потоке планировщика Bukkit
                     Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, BotSession.this::connect, 200L);
@@ -87,15 +98,29 @@ public class BotSession {
 
     /**
      * Отправляет текст от имени виртуального игрока.
-     * Если text начинается с "/", сервер обработает это как команду -
-     * так работает обычный чат-пакет ванильного протокола, отдельного
-     * пакета для команд не требуется.
+     * Если text начинается с "/" - отправляется как команда
+     * (ServerboundChatCommandPacket, без "/"). Иначе - как обычное
+     * сообщение чата (ServerboundChatPacket, без подписи - см.
+     * предупреждение в шапке файла).
      */
     public synchronized boolean say(String text) {
         if (session == null || !session.isConnected()) {
             return false;
         }
-        session.send(new ServerboundChatPacket(text));
+
+        if (text.startsWith("/")) {
+            session.send(new ServerboundChatCommandPacket(text.substring(1)));
+        } else {
+            session.send(new ServerboundChatPacket(
+                text,
+                System.currentTimeMillis(),
+                0L,
+                null,
+                0,
+                new BitSet(20),
+                0
+            ));
+        }
         return true;
     }
 

@@ -63,6 +63,19 @@
             <artifactId>protocol</artifactId>
             <version>26.2-SNAPSHOT</version>
         </dependency>
+
+        <dependency>
+            <!--
+              Явно добавляем сериализатор Adventure-компонентов в plain-текст -
+              используется только для читаемого логирования причины
+              отключения (Component -> String). Версия должна совпадать с
+              той, что использует сама ветка feature/26.2 (см. gradle/libs.versions.toml
+              в исходниках MCProtocolLib - там "adventure = 5.2.0").
+            -->
+            <groupId>net.kyori</groupId>
+            <artifactId>adventure-text-serializer-plain</artifactId>
+            <version>5.2.0</version>
+        </dependency>
     </dependencies>
 
     <build>
